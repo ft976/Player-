@@ -75,6 +75,7 @@ fun PlayerScreen(
     var currentSubtitleText by remember { mutableStateOf("") }
     var subtitleFileName by remember { mutableStateOf("") }
     var showSubtitleDialog by remember { mutableStateOf(false) }
+    var isCaptionActive by remember { mutableStateOf(true) }
 
     val exoPlayer = remember {
         ExoPlayer.Builder(context).build()
@@ -216,6 +217,40 @@ fun PlayerScreen(
         activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         onDispose {
             activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
+
+    // Dynamic sticky immersive full screen controller for status & navigation bars
+    val window = activity?.window
+    LaunchedEffect(showControls, isInPipMode) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val controller = window?.insetsController
+            if (controller != null) {
+                if (!showControls || isInPipMode) {
+                    controller.hide(android.view.WindowInsets.Type.statusBars() or android.view.WindowInsets.Type.navigationBars())
+                    controller.systemBarsBehavior = android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                } else {
+                    controller.show(android.view.WindowInsets.Type.statusBars() or android.view.WindowInsets.Type.navigationBars())
+                }
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            if (!showControls || isInPipMode) {
+                window?.decorView?.systemUiVisibility = (
+                    android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                    or android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    or android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                    or android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                    or android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                    or android.view.View.SYSTEM_UI_FLAG_FULLSCREEN
+                )
+            } else {
+                window?.decorView?.systemUiVisibility = (
+                    android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    or android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                    or android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                )
+            }
         }
     }
 
@@ -393,12 +428,12 @@ fun PlayerScreen(
         }
 
         // Subtitles custom text overlays
-        if (currentSubtitleText.isNotEmpty() && !isLocked && !isAudioOnly) {
+        if (isCaptionActive && currentSubtitleText.isNotEmpty() && !isLocked && !isAudioOnly && !isInPipMode) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = 96.dp)
+                    .padding(bottom = if (showControls) 110.dp else 40.dp)
                     .padding(horizontal = 24.dp),
                 contentAlignment = Alignment.Center
             ) {
@@ -500,6 +535,15 @@ fun PlayerScreen(
                 // Subtitle launcher modal
                 IconButton(onClick = { showSubtitleDialog = true }) {
                     Icon(Icons.Default.Subtitles, contentDescription = "Subtitle Loader", tint = Color.White)
+                }
+
+                // Toggle Captions
+                IconButton(onClick = { isCaptionActive = !isCaptionActive }) {
+                    Icon(
+                        imageVector = Icons.Default.ClosedCaption,
+                        contentDescription = "Toggle Captions",
+                        tint = if (isCaptionActive) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.5f)
+                    )
                 }
 
                 // Controls Lock

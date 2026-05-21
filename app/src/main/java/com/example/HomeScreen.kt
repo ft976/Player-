@@ -31,6 +31,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.launch
+import android.widget.Toast
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import coil.request.videoFrameMillis
@@ -820,6 +823,8 @@ fun YouTubeTab(viewModel: MainViewModel, onPlayYoutube: (url: String, title: Str
 
         item {
             streamInfoResult?.getOrNull()?.let { info ->
+                val context = LocalContext.current
+                
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -827,149 +832,454 @@ fun YouTubeTab(viewModel: MainViewModel, onPlayYoutube: (url: String, title: Str
                     shape = RoundedCornerShape(24.dp),
                     colors = CardDefaults.cardColors(containerColor = Color(0xFF1E2230))
                 ) {
-                    Column {
-                        // 16:9 Widescreen YouTube Video Thumbnail Preview
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .aspectRatio(16f / 9f)
-                                .background(Color.Black),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            AsyncImage(
-                                model = ImageRequest.Builder(LocalContext.current)
-                                    .data(info.thumbnailUrl)
-                                    .crossfade(true)
-                                    .build(),
-                                contentDescription = "YouTube Video Preview Thumbnail",
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                            
-                            // Dim gradient overlay
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(
-                                        Brush.verticalGradient(
-                                            colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.7f))
-                                        )
-                                    )
-                            )
-                            
-                            // Glowing central play indicator
-                            Box(
-                                modifier = Modifier
-                                    .size(56.dp)
-                                    .clip(CircleShape)
-                                    .background(Color.Red.copy(alpha = 0.85f)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.PlayArrow,
-                                    contentDescription = "Play Preview",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(36.dp)
-                                )
-                            }
-                        }
-                        
+                    if (info.isPlaylist) {
+                        // ==========================================
+                        // PLAYLIST DETAIL RENDERING MODE
+                        // ==========================================
                         Column(modifier = Modifier.padding(20.dp)) {
-                            // Uploader / Channel tag
-                            if (!info.uploader.isNullOrBlank()) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.padding(bottom = 6.dp)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(MaterialTheme.colorScheme.primaryContainer),
+                                    contentAlignment = Alignment.Center
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Default.AccountCircle,
-                                        contentDescription = null,
+                                        imageVector = Icons.Default.PlaylistPlay,
+                                        contentDescription = "Playlist",
                                         tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(16.dp)
+                                        modifier = Modifier.size(28.dp)
                                     )
-                                    Spacer(modifier = Modifier.width(6.dp))
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column {
                                     Text(
-                                        text = info.uploader,
-                                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
-                                        color = MaterialTheme.colorScheme.primary
+                                        text = info.title,
+                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = Color.White,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = "Playlist • by ${info.uploader ?: "Various Artists"}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = Color.LightGray
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(16.dp))
+                            HorizontalDivider(color = Color(0xFF2F354A))
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            Text(
+                                text = "Videos in Playlist (${info.playlistVideos.size}):",
+                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(bottom = 8.dp)
+                            )
+
+                            // Quick download all / Bulk action
+                            if (info.playlistVideos.isNotEmpty()) {
+                                Button(
+                                    onClick = {
+                                        Toast.makeText(context, "Extracting and scheduling downloads for all playlist items...", Toast.LENGTH_LONG).show()
+                                        // Loop and extract in the background or trigger sequentials
+                                        info.playlistVideos.forEach { item ->
+                                            viewModel.viewModelScope.launch {
+                                                try {
+                                                    val res = YouTubeRepository().getStreamInfo(item.videoId)
+                                                    res.getOrNull()?.let { streamDetails ->
+                                                        // Auto download best video/audio format
+                                                        val finalUrl = streamDetails.audioUrl ?: streamDetails.videoUrl
+                                                        if (finalUrl != null) {
+                                                            val finalTitle = streamDetails.title
+                                                            startDownload(context, finalUrl, finalTitle, true, "128kbps")
+                                                        }
+                                                    }
+                                                } catch (e: Exception) {
+                                                    // fail-silent
+                                                }
+                                            }
+                                        }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+                                ) {
+                                    Icon(Icons.Default.Download, contentDescription = null, tint = Color.Black)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Download Entire Playlist (All as MP3 Audio)", color = Color.Black, fontWeight = FontWeight.Bold)
+                                }
+                            }
+
+                            // Dynamic items mapping list
+                            info.playlistVideos.forEachIndexed { index, playlistVideo ->
+                                Card(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 4.dp)
+                                        .clickable {
+                                            url = "https://www.youtube.com/watch?v=${playlistVideo.videoId}"
+                                            viewModel.fetchYoutubeStream(url)
+                                        },
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = CardDefaults.cardColors(containerColor = Color(0xFF131722))
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(10.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "${index + 1}",
+                                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                            color = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.width(28.dp)
+                                        )
+
+                                        AsyncImage(
+                                            model = ImageRequest.Builder(LocalContext.current)
+                                                .data(playlistVideo.thumbnailUrl)
+                                                .crossfade(true)
+                                                .build(),
+                                            contentDescription = null,
+                                            modifier = Modifier
+                                                .size(54.dp)
+                                                .clip(RoundedCornerShape(8.dp)),
+                                            contentScale = ContentScale.Crop
+                                        )
+
+                                        Spacer(modifier = Modifier.width(12.dp))
+
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = playlistVideo.title,
+                                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                                color = Color.White,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Text(
+                                                text = playlistVideo.uploader ?: "YouTube Artist",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = Color.LightGray
+                                            )
+                                        }
+
+                                        Spacer(modifier = Modifier.width(8.dp))
+
+                                        IconButton(
+                                            onClick = {
+                                                // Trigger fast stream extraction of this specific video so they can download it
+                                                url = "https://www.youtube.com/watch?v=${playlistVideo.videoId}"
+                                                viewModel.fetchYoutubeStream(url)
+                                            }
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Bolt,
+                                                contentDescription = "Extract Video",
+                                                tint = MaterialTheme.colorScheme.primary
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        // ==========================================
+                        // SINGLE VIDEO DETAIL RENDERING MODE
+                        // ==========================================
+                        Column {
+                            // 16:9 Widescreen YouTube Video Thumbnail Preview
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .aspectRatio(16f / 9f)
+                                    .background(Color.Black),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                AsyncImage(
+                                    model = ImageRequest.Builder(LocalContext.current)
+                                        .data(info.thumbnailUrl)
+                                        .crossfade(true)
+                                        .build(),
+                                    contentDescription = "YouTube Video Preview Thumbnail",
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                                
+                                // Dim gradient overlay
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(
+                                            Brush.verticalGradient(
+                                                colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.7f))
+                                            )
+                                        )
+                                )
+                                
+                                // Glowing central play indicator
+                                Box(
+                                    modifier = Modifier
+                                        .size(56.dp)
+                                        .clip(CircleShape)
+                                        .background(Color.Red.copy(alpha = 0.85f))
+                                        .clickable {
+                                            if (info.videoUrl != null) {
+                                                onPlayYoutube(info.videoUrl, info.title, false)
+                                            }
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.PlayArrow,
+                                        contentDescription = "Play Preview",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(36.dp)
                                     )
                                 }
                             }
                             
-                            // Title
-                            Text(
-                                text = info.title, 
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold), 
-                                color = Color.White,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            
-                            // Description snippet if available
-                            if (!info.description.isNullOrBlank()) {
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Text(
-                                    text = info.description.trim(),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = Color.LightGray.copy(alpha = 0.8f),
-                                    maxLines = 3,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                            
-                            Spacer(modifier = Modifier.height(20.dp))
-                            
-                            Column(
-                                verticalArrangement = Arrangement.spacedBy(10.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                if (info.videoUrl != null) {
-                                    Button(
-                                        onClick = { onPlayYoutube(info.videoUrl, info.title, false) },
-                                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                                        shape = RoundedCornerShape(12.dp),
-                                        modifier = Modifier.fillMaxWidth()
+                            Column(modifier = Modifier.padding(20.dp)) {
+                                // Uploader / Channel tag
+                                if (!info.uploader.isNullOrBlank()) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.padding(bottom = 6.dp)
                                     ) {
-                                        Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.Black)
-                                        Spacer(Modifier.width(8.dp))
-                                        Text("Play Live Video (upto 4x)", color = Color.Black, fontWeight = FontWeight.Bold)
-                                    }
-                                    
-                                    Button(
-                                        onClick = { streamToAdd = info; isAddAudioOnly = false },
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2F354A)),
-                                        shape = RoundedCornerShape(12.dp),
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Icon(Icons.Default.Add, contentDescription = null, tint = Color.White)
-                                        Spacer(Modifier.width(8.dp))
-                                        Text("Add Video to Playlist", color = Color.White, fontWeight = FontWeight.Bold)
+                                        Icon(
+                                            imageVector = Icons.Default.AccountCircle,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = info.uploader,
+                                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
                                     }
                                 }
                                 
-                                if (info.audioUrl != null) {
-                                    HorizontalDivider(color = Color(0xFF2F354A), modifier = Modifier.padding(vertical = 4.dp))
-                                    
-                                    Button(
-                                        onClick = { onPlayYoutube(info.audioUrl, info.title, true) },
-                                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
-                                        shape = RoundedCornerShape(12.dp),
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Icon(Icons.Default.Audiotrack, contentDescription = null, tint = Color.White)
-                                        Spacer(Modifier.width(8.dp))
-                                        Text("Play Audio Only (Screen-off safe)", color = Color.White, fontWeight = FontWeight.Bold)
+                                // Title
+                                Text(
+                                    text = info.title, 
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold), 
+                                    color = Color.White,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                
+                                // Description snippet if available
+                                if (!info.description.isNullOrBlank()) {
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        text = info.description.trim(),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = Color.LightGray.copy(alpha = 0.8f),
+                                        maxLines = 3,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                
+                                Spacer(modifier = Modifier.height(20.dp))
+                                
+                                // PLAYBACK ACTIONS MODULE
+                                Text(
+                                    text = "FAST PLAYBACK SELECTIONS",
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, letterSpacing = 1.sp),
+                                    color = Color.LightGray,
+                                    modifier = Modifier.padding(bottom = 8.dp)
+                                )
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    if (info.videoUrl != null) {
+                                        Button(
+                                            onClick = { onPlayYoutube(info.videoUrl, info.title, false) },
+                                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                                            shape = RoundedCornerShape(12.dp),
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.Black)
+                                            Spacer(Modifier.width(4.dp))
+                                            Text("Play Video", color = Color.Black, fontWeight = FontWeight.Bold)
+                                        }
                                     }
-                                    
+
+                                    if (info.audioUrl != null) {
+                                        Button(
+                                            onClick = { onPlayYoutube(info.audioUrl, info.title, true) },
+                                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
+                                            shape = RoundedCornerShape(12.dp),
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Icon(Icons.Default.Audiotrack, contentDescription = null, tint = Color.White)
+                                            Spacer(Modifier.width(4.dp))
+                                            Text("Play Audio Mode", color = Color.White, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(8.dp))
+
+                                Button(
+                                    onClick = { streamToAdd = info; isAddAudioOnly = false },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2F354A)),
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Icon(Icons.Default.Add, contentDescription = null, tint = Color.White)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Add to Video Playlist", color = Color.White, fontWeight = FontWeight.Bold)
+                                }
+
+                                Spacer(modifier = Modifier.height(20.dp))
+                                HorizontalDivider(color = Color(0xFF2F354A))
+                                Spacer(modifier = Modifier.height(16.dp))
+
+                                // DOWNLOAD VIDEO AT SEVERAL QUALITIES (MP4)
+                                Text(
+                                    text = "⚡ DOWNLOAD VIDEO QUALITIES (MP4)",
+                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.ExtraBold),
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(bottom = 12.dp)
+                                )
+
+                                val filteredFormats = info.videoFormats.filter { !it.videoOnly || it.format == "MPEG_4" || it.quality.isNotBlank() }
+                                if (filteredFormats.isNotEmpty()) {
+                                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        filteredFormats.forEach { format ->
+                                            val label = if (format.videoOnly) "${format.quality} (Silent MP4 - No Audio)" else "${format.quality} (Full HD MP4)"
+                                            Card(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                shape = RoundedCornerShape(12.dp),
+                                                colors = CardDefaults.cardColors(containerColor = Color(0xFF131722))
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Column {
+                                                        Text(
+                                                            text = label,
+                                                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                                            color = Color.White
+                                                        )
+                                                        Text(
+                                                            text = "Format: MP4 • Format codec: ${format.format}",
+                                                            style = MaterialTheme.typography.bodySmall,
+                                                            color = Color.LightGray
+                                                        )
+                                                    }
+                                                    IconButton(
+                                                        onClick = {
+                                                            startDownload(context, format.url, info.title, false, format.quality)
+                                                        }
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = Icons.Default.Download,
+                                                            contentDescription = "Download Video",
+                                                            tint = MaterialTheme.colorScheme.primary
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    // Fallback when video formats list is empty
                                     Button(
-                                        onClick = { streamToAdd = info; isAddAudioOnly = true },
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2F354A)),
+                                        onClick = {
+                                            if (info.videoUrl != null) {
+                                                startDownload(context, info.videoUrl, info.title, false, "Standard Quality")
+                                            }
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF131722)),
                                         shape = RoundedCornerShape(12.dp),
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
-                                        Icon(Icons.Default.Add, contentDescription = null, tint = Color.White)
-                                        Spacer(Modifier.width(8.dp))
-                                        Text("Add Audio only to Playlist", color = Color.White, fontWeight = FontWeight.Bold)
+                                        Icon(Icons.Default.Download, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("Download Video (Standard Quality - MP4)", color = Color.White)
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(20.dp))
+
+                                // DOWNLOAD AUDIO QUALITY OPTIONS (MP3)
+                                Text(
+                                    text = "🎵 DOWNLOAD AUDIO SOUNDTRACKS (MP3)",
+                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.ExtraBold),
+                                    color = MaterialTheme.colorScheme.secondary,
+                                    modifier = Modifier.padding(bottom = 12.dp)
+                                )
+
+                                if (info.audioFormats.isNotEmpty()) {
+                                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        info.audioFormats.forEach { audioFormat ->
+                                            val bitrateKbps = if (audioFormat.bitrate > 0) "${audioFormat.bitrate / 1000}kbps" else "128kbps"
+                                            Card(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                shape = RoundedCornerShape(12.dp),
+                                                colors = CardDefaults.cardColors(containerColor = Color(0xFF131722))
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Column {
+                                                        Text(
+                                                            text = "Download MP3 ($bitrateKbps Quality)",
+                                                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                                            color = Color.White
+                                                        )
+                                                        Text(
+                                                            text = "Format: MP3 • Bitrate: $bitrateKbps",
+                                                            style = MaterialTheme.typography.bodySmall,
+                                                            color = Color.LightGray
+                                                        )
+                                                    }
+                                                    IconButton(
+                                                        onClick = {
+                                                            startDownload(context, audioFormat.url, info.title, true, bitrateKbps)
+                                                        }
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = Icons.Default.Download,
+                                                            contentDescription = "Download Audio",
+                                                            tint = MaterialTheme.colorScheme.secondary
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    // Fallback when audio formats list is empty
+                                    Button(
+                                        onClick = {
+                                            if (info.audioUrl != null) {
+                                                startDownload(context, info.audioUrl, info.title, true, "Standard MP3")
+                                            }
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF131722)),
+                                        shape = RoundedCornerShape(12.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Icon(Icons.Default.Download, contentDescription = null, tint = MaterialTheme.colorScheme.secondary)
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("Download Audio Track (MP3)", color = Color.White)
                                     }
                                 }
                             }
@@ -989,5 +1299,28 @@ fun formatDuration(millis: Long): String {
         String.format("%d:%02d:%02d", hours, minutes, seconds)
     } else {
         String.format("%02d:%02d", minutes, seconds)
+    }
+}
+
+fun startDownload(context: android.content.Context, url: String, title: String, isAudio: Boolean, qualityStr: String) {
+    try {
+        val downloadManager = context.getSystemService(android.content.Context.DOWNLOAD_SERVICE) as android.app.DownloadManager
+        val cleanTitle = title.replace("[\\\\/:*?\"<>|]".toRegex(), "_")
+        val ext = if (isAudio) "mp3" else "mp4"
+        val label = if (isAudio) "MP3" else "MP4 ($qualityStr)"
+        val filename = "$cleanTitle.$ext"
+
+        val request = android.app.DownloadManager.Request(Uri.parse(url))
+            .setTitle(cleanTitle)
+            .setDescription("Downloading YouTube $label stream")
+            .setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+            .setDestinationInExternalPublicDir(android.os.Environment.DIRECTORY_DOWNLOADS, filename)
+            .setAllowedOverMetered(true)
+            .setAllowedOverRoaming(true)
+
+        downloadManager.enqueue(request)
+        Toast.makeText(context, "Download started: $cleanTitle ($label)", Toast.LENGTH_SHORT).show()
+    } catch (e: Exception) {
+        Toast.makeText(context, "Download failed error: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
     }
 }

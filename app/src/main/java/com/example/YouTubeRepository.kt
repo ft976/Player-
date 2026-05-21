@@ -12,6 +12,19 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.suspendCoroutine
 
+data class YouTubeVideoFormat(
+    val url: String,
+    val quality: String,
+    val format: String,
+    val videoOnly: Boolean
+)
+
+data class YouTubeAudioFormat(
+    val url: String,
+    val format: String,
+    val bitrate: Int
+)
+
 data class YouTubeStreamInfo(
     val title: String,
     val videoUrl: String?,
@@ -19,7 +32,11 @@ data class YouTubeStreamInfo(
     val thumbnailUrl: String?,
     val description: String?,
     val uploader: String?,
-    val videoId: String
+    val videoId: String,
+    val videoFormats: List<YouTubeVideoFormat> = emptyList(),
+    val audioFormats: List<YouTubeAudioFormat> = emptyList(),
+    val isPlaylist: Boolean = false,
+    val playlistVideos: List<YouTubeStreamInfo> = emptyList()
 )
 
 class YouTubeRepository {
@@ -34,10 +51,32 @@ class YouTubeRepository {
         "https://pipedapi.tokhmi.xyz"
     )
 
+    fun extractPlaylistId(youtubeUrl: String): String? {
+        val trimmed = youtubeUrl.trim()
+        val uri = try { Uri.parse(trimmed) } catch (e: Exception) { null }
+        if (uri != null) {
+            val listParam = uri.getQueryParameter("list")
+            if (!listParam.isNullOrBlank()) return listParam
+        }
+        if (trimmed.contains("list=")) {
+            val idx = trimmed.indexOf("list=") + 5
+            val sub = trimmed.substring(idx)
+            val endIdx = sub.indexOfAny(charArrayOf('?', '&', '/'))
+            return if (endIdx == -1) sub else sub.substring(0, endIdx)
+        }
+        return null
+    }
+
     suspend fun getStreamInfo(youtubeUrl: String): Result<YouTubeStreamInfo> = withContext(Dispatchers.IO) {
         try {
-            val videoId = extractVideoId(youtubeUrl) ?: throw IllegalArgumentException("Invalid YouTube URL")
-            Log.d(TAG, "Extracted Video ID: $videoId")
+            val playlistId = extractPlaylistId(youtubeUrl)
+            val isPlaylistRequest = playlistId != null
+
+            val videoId = if (!isPlaylistRequest) {
+                extractVideoId(youtubeUrl) ?: throw IllegalArgumentException("Invalid YouTube URL")
+            } else null
+
+            Log.d(TAG, "Request - playlistId: $playlistId, videoId: $videoId")
 
             // Create list of base API URLs starting with our static fallback ones
             val baseUrls = ArrayList<String>(staticInstances)
@@ -58,48 +97,130 @@ class YouTubeRepository {
 
             for (baseUrl in baseUrls) {
                 try {
-                    val apiUrl = "$baseUrl/streams/$videoId"
+                    val apiUrl = if (isPlaylistRequest) {
+                        "$baseUrl/playlists/$playlistId"
+                    } else {
+                        "$baseUrl/streams/$videoId"
+                    }
                     Log.d(TAG, "Trying Piped Instance API URL: $apiUrl")
                     val url = URL(apiUrl)
                     val connection = url.openConnection() as HttpURLConnection
                     connection.requestMethod = "GET"
-                    connection.connectTimeout = 3500
-                    connection.readTimeout = 3500
+                    connection.connectTimeout = 4000
+                    connection.readTimeout = 4000
                     connection.setRequestProperty("Accept", "application/json")
                     
                     if (connection.responseCode == 200) {
                         val response = connection.inputStream.bufferedReader().use { it.readText() }
                         val json = JSONObject(response)
-                        val title = json.optString("title", "YouTube Video")
-                        val description = json.optString("description", "")
-                        val uploader = json.optString("uploader", "")
-                        val piperThumbnail = json.optString("thumbnailUrl", "")
-                        val thumbnailUrl = if (piperThumbnail.isNotBlank()) piperThumbnail else "https://img.youtube.com/vi/$videoId/hqdefault.jpg"
                         
-                        val videoStreams = json.optJSONArray("videoStreams")
-                        var bestVideoUrl: String? = null
-                        if (videoStreams != null && videoStreams.length() > 0) {
-                            for (i in 0 until videoStreams.length()) {
-                                val stream = videoStreams.getJSONObject(i)
-                                // Standard quality preference or grab standard mp4
-                                val videoFormat = stream.optString("format", "")
-                                val quality = stream.optString("quality", "")
-                                if (videoFormat == "MPEG_4" || quality.contains("720p") || quality.contains("1080p") || quality.contains("360p")) {
-                                    bestVideoUrl = stream.optString("url")
-                                    if (videoFormat == "MPEG_4") break // prioritize mp4
+                        if (isPlaylistRequest) {
+                            val name = json.optString("name", "YouTube Playlist")
+                            val uploader = json.optString("uploader", "Various Artists")
+                            val playlistThumbnail = json.optString("thumbnailUrl", "")
+                            
+                            val relatedStreams = json.optJSONArray("relatedStreams")
+                            val playlistVideos = mutableListOf<YouTubeStreamInfo>()
+                            if (relatedStreams != null) {
+                                for (i in 0 until relatedStreams.length()) {
+                                    val streamObj = relatedStreams.getJSONObject(i)
+                                    val streamPath = streamObj.optString("url", "")
+                                    val vId = if (streamPath.contains("v=")) {
+                                        streamPath.substringAfter("v=")
+                                    } else {
+                                        streamPath.substringAfterLast("/")
+                                    }
+                                    val itemTitle = streamObj.optString("title", "Video Item")
+                                    val itemThumbnail = streamObj.optString("thumbnail", "")
+                                    val itemUploader = streamObj.optString("uploaderName", "")
+                                    playlistVideos.add(
+                                        YouTubeStreamInfo(
+                                            title = itemTitle,
+                                            videoUrl = null,
+                                            audioUrl = null,
+                                            thumbnailUrl = itemThumbnail,
+                                            description = null,
+                                            uploader = itemUploader,
+                                            videoId = vId,
+                                            isPlaylist = false
+                                        )
+                                    )
                                 }
                             }
-                            if (bestVideoUrl == null) bestVideoUrl = videoStreams.getJSONObject(0).optString("url")
+                            Log.d(TAG, "Successfully extracted playlist: $name with ${playlistVideos.size} items")
+                            return@withContext Result.success(
+                                YouTubeStreamInfo(
+                                    title = name,
+                                    videoUrl = null,
+                                    audioUrl = null,
+                                    thumbnailUrl = playlistThumbnail,
+                                    description = "YouTube Playlist",
+                                    uploader = uploader,
+                                    videoId = playlistId ?: "",
+                                    isPlaylist = true,
+                                    playlistVideos = playlistVideos
+                                )
+                            )
+                        } else {
+                            val title = json.optString("title", "YouTube Video")
+                            val description = json.optString("description", "")
+                            val uploader = json.optString("uploader", "")
+                            val piperThumbnail = json.optString("thumbnailUrl", "")
+                            val thumbnailUrl = if (piperThumbnail.isNotBlank()) piperThumbnail else "https://img.youtube.com/vi/$videoId/hqdefault.jpg"
+                            
+                            val videoStreams = json.optJSONArray("videoStreams")
+                            val parsedVideoFormats = mutableListOf<YouTubeVideoFormat>()
+                            var bestVideoUrl: String? = null
+                            if (videoStreams != null && videoStreams.length() > 0) {
+                                for (i in 0 until videoStreams.length()) {
+                                    val stream = videoStreams.getJSONObject(i)
+                                    val streamUrl = stream.optString("url", "")
+                                    val quality = stream.optString("quality", "")
+                                    val format = stream.optString("format", "")
+                                    val videoOnly = stream.optBoolean("videoOnly", false)
+                                    if (streamUrl.isNotBlank()) {
+                                        parsedVideoFormats.add(YouTubeVideoFormat(streamUrl, quality, format, videoOnly))
+                                    }
+                                    if (bestVideoUrl == null || (format == "MPEG_4" && !videoOnly)) {
+                                        bestVideoUrl = streamUrl
+                                    }
+                                }
+                            }
+                            
+                            val audioStreams = json.optJSONArray("audioStreams")
+                            val parsedAudioFormats = mutableListOf<YouTubeAudioFormat>()
+                            var bestAudioUrl: String? = null
+                            if (audioStreams != null && audioStreams.length() > 0) {
+                                for (i in 0 until audioStreams.length()) {
+                                    val stream = audioStreams.getJSONObject(i)
+                                    val streamUrl = stream.optString("url", "")
+                                    val format = stream.optString("format", "M4A")
+                                    val bitrate = stream.optInt("bitrate", 128)
+                                    if (streamUrl.isNotBlank()) {
+                                        parsedAudioFormats.add(YouTubeAudioFormat(streamUrl, format, bitrate))
+                                    }
+                                    if (bestAudioUrl == null) {
+                                        bestAudioUrl = streamUrl
+                                    }
+                                }
+                            }
+                            
+                            Log.d(TAG, "Successfully extracted streams logic. Videos: ${parsedVideoFormats.size}, Audios: ${parsedAudioFormats.size}")
+                            return@withContext Result.success(
+                                YouTubeStreamInfo(
+                                    title = title,
+                                    videoUrl = bestVideoUrl,
+                                    audioUrl = bestAudioUrl,
+                                    thumbnailUrl = thumbnailUrl,
+                                    description = description,
+                                    uploader = uploader,
+                                    videoId = videoId ?: "",
+                                    videoFormats = parsedVideoFormats,
+                                    audioFormats = parsedAudioFormats,
+                                    isPlaylist = false
+                                )
+                            )
                         }
-                        
-                        val audioStreams = json.optJSONArray("audioStreams")
-                        var bestAudioUrl: String? = null
-                        if (audioStreams != null && audioStreams.length() > 0) {
-                            bestAudioUrl = audioStreams.getJSONObject(0).optString("url")
-                        }
-                        
-                        Log.d(TAG, "Successfully extracted stream urls from instance: $baseUrl")
-                        return@withContext Result.success(YouTubeStreamInfo(title, bestVideoUrl, bestAudioUrl, thumbnailUrl, description, uploader, videoId))
                     } else {
                         Log.w(TAG, "Instance $baseUrl returned non-200 code: ${connection.responseCode}")
                         lastError = Exception("Instance $baseUrl returned code: ${connection.responseCode}")
@@ -110,7 +231,7 @@ class YouTubeRepository {
                 }
             }
             
-            Result.failure(lastError ?: Exception("Could not fetch YouTube streams from any Piped instance."))
+            Result.failure(lastError ?: Exception("Could not fetch YouTube streams from Piped instances."))
         } catch (e: Exception) {
             Result.failure(e)
         }

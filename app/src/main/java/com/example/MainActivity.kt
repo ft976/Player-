@@ -20,6 +20,9 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
+import coil.Coil
+import coil.ImageLoader
+import coil.decode.VideoFrameDecoder
 import com.example.ui.theme.MyApplicationTheme
 import kotlinx.serialization.Serializable
 
@@ -46,6 +49,16 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        // Setup ImageLoader for Coil with support for decoding video thumbnails
+        val imageLoader = ImageLoader.Builder(this)
+            .components {
+                add(VideoFrameDecoder.Factory())
+            }
+            .crossfade(true)
+            .build()
+        Coil.setImageLoader(imageLoader)
+
         enableEdgeToEdge()
         requestStoragePermissions()
         handleIntent(intent)
