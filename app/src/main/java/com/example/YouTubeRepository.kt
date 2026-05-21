@@ -15,7 +15,11 @@ import kotlin.coroutines.suspendCoroutine
 data class YouTubeStreamInfo(
     val title: String,
     val videoUrl: String?,
-    val audioUrl: String?
+    val audioUrl: String?,
+    val thumbnailUrl: String?,
+    val description: String?,
+    val uploader: String?,
+    val videoId: String
 )
 
 class YouTubeRepository {
@@ -67,6 +71,10 @@ class YouTubeRepository {
                         val response = connection.inputStream.bufferedReader().use { it.readText() }
                         val json = JSONObject(response)
                         val title = json.optString("title", "YouTube Video")
+                        val description = json.optString("description", "")
+                        val uploader = json.optString("uploader", "")
+                        val piperThumbnail = json.optString("thumbnailUrl", "")
+                        val thumbnailUrl = if (piperThumbnail.isNotBlank()) piperThumbnail else "https://img.youtube.com/vi/$videoId/hqdefault.jpg"
                         
                         val videoStreams = json.optJSONArray("videoStreams")
                         var bestVideoUrl: String? = null
@@ -91,7 +99,7 @@ class YouTubeRepository {
                         }
                         
                         Log.d(TAG, "Successfully extracted stream urls from instance: $baseUrl")
-                        return@withContext Result.success(YouTubeStreamInfo(title, bestVideoUrl, bestAudioUrl))
+                        return@withContext Result.success(YouTubeStreamInfo(title, bestVideoUrl, bestAudioUrl, thumbnailUrl, description, uploader, videoId))
                     } else {
                         Log.w(TAG, "Instance $baseUrl returned non-200 code: ${connection.responseCode}")
                         lastError = Exception("Instance $baseUrl returned code: ${connection.responseCode}")
@@ -136,14 +144,46 @@ class YouTubeRepository {
         list
     }
 
-    private fun extractVideoId(youtubeUrl: String): String? {
-        var vId: String? = null
-        val pattern = "(?<=watch\\?v=|/videos/|embed\\/|youtu.be\\/|\\/v\\/|\\/e\\/|watch\\?v%3D|watch\\?feature=player_embedded&v=|%2Fvideos%2F|embed%\u200C\u200B2F|youtu.be%2F|%2Fv%2F)[^#\\&\\?\\n]*"
-        val compiledPattern = java.util.regex.Pattern.compile(pattern)
-        val matcher = compiledPattern.matcher(youtubeUrl)
-        if (matcher.find()) {
-            vId = matcher.group()
+    fun extractVideoId(youtubeUrl: String): String? {
+        val trimmed = youtubeUrl.trim()
+        if (trimmed.length == 11 && !trimmed.contains("/") && !trimmed.contains("?")) {
+            return trimmed
         }
-        return vId
+        
+        if (trimmed.contains("/shorts/")) {
+            val idx = trimmed.indexOf("/shorts/") + "/shorts/".length
+            val sub = trimmed.substring(idx)
+            val endIdx = sub.indexOfAny(charArrayOf('?', '&', '/'))
+            return if (endIdx == -1) sub else sub.substring(0, endIdx)
+        }
+        
+        val pattern = "^(?:https?:\\/\\/)?(?:www\\.|m\\.)?(?:youtu\\.be\\/|youtube\\.com\\/(?:embed\\/|v\\/|watch\\?v=|watch\\?.+&v=))((\\w|-){11})(?:\\S+)?$"
+        val regex = java.util.regex.Pattern.compile(pattern, java.util.regex.Pattern.CASE_INSENSITIVE)
+        val matcher = regex.matcher(trimmed)
+        if (matcher.matches()) {
+            return matcher.group(1)
+        }
+        
+        try {
+            val uri = Uri.parse(trimmed)
+            if (uri.host?.contains("youtu.be") == true) {
+                return uri.lastPathSegment
+            } else if (uri.host?.contains("youtube.com") == true) {
+                return uri.getQueryParameter("v") ?: uri.lastPathSegment
+            }
+        } catch (e: Exception) {
+            // ignore
+        }
+        
+        val backupPattern = "(?:v=([^\\&\\?]+)|youtu\\.be\\/([^\\&\\?]+)|embed\\/([^\\&\\?]+)|shorts\\/([^\\&\\?]+))"
+        val backupMatcher = java.util.regex.Pattern.compile(backupPattern).matcher(trimmed)
+        if (backupMatcher.find()) {
+            for (i in 1..backupMatcher.groupCount()) {
+                val g = backupMatcher.group(i)
+                if (g != null && g.length == 11) return g
+            }
+        }
+        
+        return null
     }
 }

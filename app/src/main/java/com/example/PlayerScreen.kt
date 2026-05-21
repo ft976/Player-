@@ -150,6 +150,27 @@ fun PlayerScreen(
     var isFullScreen by remember { mutableStateOf(false) }
     val activity = context as? Activity
 
+    // Reactive picture-in-picture state tracer loop
+    var isInPipMode by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            val appInPip = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) activity?.isInPictureInPictureMode == true else false
+            if (isInPipMode != appInPip) {
+                isInPipMode = appInPip
+            }
+            delay(250)
+        }
+    }
+
+    // Auto-hiding control states after 3.5 seconds when active playing
+    var showControls by remember { mutableStateOf(true) }
+    LaunchedEffect(showControls, isPlaying) {
+        if (showControls && isPlaying) {
+            delay(3500)
+            showControls = false
+        }
+    }
+
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
@@ -212,20 +233,34 @@ fun PlayerScreen(
 
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
         if (!isAudioOnly) {
-            AndroidView(
-                factory = { ctx ->
-                    PlayerView(ctx).apply {
-                        player = exoPlayer
-                        useController = !isLocked
-                        layoutParams = FrameLayout.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            ViewGroup.LayoutParams.MATCH_PARENT
-                        )
-                        resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-                    }
-                },
-                modifier = Modifier.fillMaxSize()
-            )
+            Box(modifier = Modifier.fillMaxSize()) {
+                AndroidView(
+                    factory = { ctx ->
+                        PlayerView(ctx).apply {
+                            player = exoPlayer
+                            useController = showControls && !isLocked && !isInPipMode
+                            layoutParams = FrameLayout.LayoutParams(
+                                ViewGroup.LayoutParams.MATCH_PARENT,
+                                ViewGroup.LayoutParams.MATCH_PARENT
+                            )
+                            resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                        }
+                    },
+                    update = { playerView ->
+                        playerView.useController = showControls && !isLocked && !isInPipMode
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+
+                // Seamless overlay to trigger control appearance upon tap if they disappear
+                if (!showControls && !isLocked && !isInPipMode) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clickable { showControls = true }
+                    )
+                }
+            }
         } else {
             // High UX / Immersive visualizer dashboard for Audio Mode
             Column(
@@ -384,7 +419,7 @@ fun PlayerScreen(
             }
         }
 
-        if (isLocked) {
+        if (isLocked && !isInPipMode) {
             Box(modifier = Modifier.fillMaxSize().clickable { /* intercept touches */ })
             IconButton(
                 onClick = { isLocked = false },
@@ -396,7 +431,7 @@ fun PlayerScreen(
             ) {
                 Icon(Icons.Default.Lock, contentDescription = "Unlock Dashboard", tint = Color.White)
             }
-        } else {
+        } else if (!isLocked && showControls && !isInPipMode) {
             // Elegant glowing action header row
             Row(
                 modifier = Modifier

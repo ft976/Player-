@@ -46,6 +46,13 @@ fun HomeScreen(
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
     var showInfoDialog by remember { mutableStateOf(false) }
+
+    val streamInfoResult by viewModel.youtubeStreamInfo.collectAsState()
+    LaunchedEffect(streamInfoResult) {
+        if (streamInfoResult != null && streamInfoResult!!.isSuccess) {
+            selectedTab = 1
+        }
+    }
     
     // Modern cyberpunk themed container
     val appBgBrush = Brush.verticalGradient(
@@ -63,27 +70,17 @@ fun HomeScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.fillMaxWidth().padding(end = 12.dp)
                     ) {
-                        Box(
+                        AsyncImage(
+                            model = ImageRequest.Builder(LocalContext.current)
+                                .data(com.example.R.drawable.img_app_icon_1779376445176)
+                                .crossfade(true)
+                                .build(),
+                            contentDescription = "BoysPlayer Logo",
+                            contentScale = ContentScale.Crop,
                             modifier = Modifier
-                                .size(36.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(
-                                    Brush.linearGradient(
-                                        listOf(
-                                            MaterialTheme.colorScheme.primary,
-                                            MaterialTheme.colorScheme.secondary
-                                        )
-                                    )
-                                ),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.PlayArrow,
-                                contentDescription = null,
-                                tint = Color.Black,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                        )
                         
                         Spacer(modifier = Modifier.width(12.dp))
                         
@@ -521,112 +518,119 @@ fun VideoItem(video: LocalVideo, onClick: () -> Unit, onAddToPlaylist: () -> Uni
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 6.dp)
+            .padding(vertical = 8.dp)
             .clickable { onClick() },
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(
             containerColor = Color(0xFF161922)
         )
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+        Column {
+            // Widescreen 16:9 Aspect Ratio video thumbnail with duration overlay
             Box(
                 modifier = Modifier
-                    .size(56.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Color(0xFF242938)),
+                    .fillMaxWidth()
+                    .aspectRatio(16f / 9f)
+                    .background(Color(0xFF10121A)),
                 contentAlignment = Alignment.Center
             ) {
                 AsyncImage(
                     model = ImageRequest.Builder(LocalContext.current)
                         .data(video.uri)
-                        .videoFrameMillis(1000)
+                        .videoFrameMillis(2000) // Frame at 2s is typically better than 1s
                         .crossfade(true)
                         .build(),
-                    contentDescription = "Thumbnail",
+                    contentDescription = "Thumbnail for ${video.name}",
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize()
                 )
                 
-                // Overlay clean play node
+                // Translucent dim gradient at the bottom base
                 Box(
                     modifier = Modifier
-                        .size(24.dp)
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.6f))
+                            )
+                        )
+                )
+
+                // High UX stylized play button at the center
+                Box(
+                    modifier = Modifier
+                        .size(52.dp)
                         .clip(CircleShape)
-                        .background(Color.Black.copy(alpha = 0.6f)),
+                        .background(Color.Black.copy(alpha = 0.5f)),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = Icons.Default.PlayArrow,
-                        contentDescription = null,
+                        contentDescription = "Play Video",
                         tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(36.dp)
                     )
+                }
+                
+                // Duration Overlay badge at the bottom right
+                if (video.durationMillis > 0) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(12.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Color.Black.copy(alpha = 0.8f))
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = formatDuration(video.durationMillis),
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.ExtraBold),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
                 }
             }
             
-            Spacer(modifier = Modifier.width(16.dp))
-            
-            Column(
-                modifier = Modifier.weight(1f)
+            // Text metadata row layout
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text(
-                    text = video.name,
-                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                    color = Color.White,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                
-                Spacer(modifier = Modifier.height(4.dp))
-                
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = video.name,
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = Color.White,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = "Size: ${video.size / (1024 * 1024)} MB",
                         style = MaterialTheme.typography.bodySmall,
                         color = Color.Gray
                     )
-                    
-                    if (video.durationMillis > 0) {
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(Color.Black.copy(alpha = 0.3f))
-                                .padding(horizontal = 4.dp, vertical = 2.dp)
-                        ) {
-                            Text(
-                                text = formatDuration(video.durationMillis),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
+                }
+
+                var expanded by remember { mutableStateOf(false) }
+
+                Box {
+                    IconButton(onClick = { expanded = true }) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "More", tint = Color.LightGray)
                     }
-                }
-            }
-
-            var expanded by remember { mutableStateOf(false) }
-
-            Box {
-                IconButton(onClick = { expanded = true }) {
-                    Icon(Icons.Default.MoreVert, contentDescription = "More", tint = Color.LightGray)
-                }
-                DropdownMenu(
-                    expanded = expanded, 
-                    onDismissRequest = { expanded = false },
-                    modifier = Modifier.background(Color(0xFF1E2230))
-                ) {
-                    DropdownMenuItem(
-                        text = { Text("Add to Playlist", color = Color.White) },
-                        onClick = { expanded = false; onAddToPlaylist() }
-                    )
+                    DropdownMenu(
+                        expanded = expanded, 
+                        onDismissRequest = { expanded = false },
+                        modifier = Modifier.background(Color(0xFF1E2230))
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Add to Playlist", color = Color.White) },
+                            onClick = { expanded = false; onAddToPlaylist() }
+                        )
+                    }
                 }
             }
         }
@@ -817,93 +821,156 @@ fun YouTubeTab(viewModel: MainViewModel, onPlayYoutube: (url: String, title: Str
         item {
             streamInfoResult?.getOrNull()?.let { info ->
                 Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(20.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 24.dp),
+                    shape = RoundedCornerShape(24.dp),
                     colors = CardDefaults.cardColors(containerColor = Color(0xFF1E2230))
                 ) {
-                    Column(modifier = Modifier.padding(20.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column {
+                        // 16:9 Widescreen YouTube Video Thumbnail Preview
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .aspectRatio(16f / 9f)
+                                .background(Color.Black),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            AsyncImage(
+                                model = ImageRequest.Builder(LocalContext.current)
+                                    .data(info.thumbnailUrl)
+                                    .crossfade(true)
+                                    .build(),
+                                contentDescription = "YouTube Video Preview Thumbnail",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                            
+                            // Dim gradient overlay
                             Box(
                                 modifier = Modifier
-                                    .size(36.dp)
+                                    .fillMaxSize()
+                                    .background(
+                                        Brush.verticalGradient(
+                                            colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.7f))
+                                        )
+                                    )
+                            )
+                            
+                            // Glowing central play indicator
+                            Box(
+                                modifier = Modifier
+                                    .size(56.dp)
                                     .clip(CircleShape)
-                                    .background(MaterialTheme.colorScheme.primaryContainer),
+                                    .background(Color.Red.copy(alpha = 0.85f)),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Icon(Icons.Default.VideoLibrary, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                                Icon(
+                                    imageVector = Icons.Default.PlayArrow,
+                                    contentDescription = "Play Preview",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(36.dp)
+                                )
                             }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Text(
-                                "Ready to Play", 
-                                style = MaterialTheme.typography.titleSmall, 
-                                color = MaterialTheme.colorScheme.primary,
-                                fontWeight = FontWeight.Bold
-                            )
                         }
                         
-                        Spacer(modifier = Modifier.height(12.dp))
-                        
-                        Text(
-                            text = info.title, 
-                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold), 
-                            color = Color.White,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        
-                        Spacer(modifier = Modifier.height(24.dp))
-                        
-                        Column(
-                            verticalArrangement = Arrangement.spacedBy(10.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            if (info.videoUrl != null) {
-                                Button(
-                                    onClick = { onPlayYoutube(info.videoUrl, info.title, false) },
-                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                                    shape = RoundedCornerShape(12.dp),
-                                    modifier = Modifier.fillMaxWidth()
+                        Column(modifier = Modifier.padding(20.dp)) {
+                            // Uploader / Channel tag
+                            if (!info.uploader.isNullOrBlank()) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(bottom = 6.dp)
                                 ) {
-                                    Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.Black)
-                                    Spacer(Modifier.width(8.dp))
-                                    Text("Play Live Video (upto 4x)", color = Color.Black, fontWeight = FontWeight.Bold)
-                                }
-                                
-                                Button(
-                                    onClick = { streamToAdd = info; isAddAudioOnly = false },
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2F354A)),
-                                    shape = RoundedCornerShape(12.dp),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Icon(Icons.Default.Add, contentDescription = null, tint = Color.White)
-                                    Spacer(Modifier.width(8.dp))
-                                    Text("Add Video to Playlist", color = Color.White, fontWeight = FontWeight.Bold)
+                                    Icon(
+                                        imageVector = Icons.Default.AccountCircle,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = info.uploader,
+                                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
                                 }
                             }
                             
-                            if (info.audioUrl != null) {
-                                HorizontalDivider(color = Color(0xFF2F354A), modifier = Modifier.padding(vertical = 4.dp))
-                                
-                                Button(
-                                    onClick = { onPlayYoutube(info.audioUrl, info.title, true) },
-                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
-                                    shape = RoundedCornerShape(12.dp),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Icon(Icons.Default.Audiotrack, contentDescription = null, tint = Color.White)
-                                    Spacer(Modifier.width(8.dp))
-                                    Text("Play Audio Only (Screen-off safe)", color = Color.White, fontWeight = FontWeight.Bold)
+                            // Title
+                            Text(
+                                text = info.title, 
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold), 
+                                color = Color.White,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            
+                            // Description snippet if available
+                            if (!info.description.isNullOrBlank()) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = info.description.trim(),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color.LightGray.copy(alpha = 0.8f),
+                                    maxLines = 3,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            
+                            Spacer(modifier = Modifier.height(20.dp))
+                            
+                            Column(
+                                verticalArrangement = Arrangement.spacedBy(10.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                if (info.videoUrl != null) {
+                                    Button(
+                                        onClick = { onPlayYoutube(info.videoUrl, info.title, false) },
+                                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                                        shape = RoundedCornerShape(12.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.Black)
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("Play Live Video (upto 4x)", color = Color.Black, fontWeight = FontWeight.Bold)
+                                    }
+                                    
+                                    Button(
+                                        onClick = { streamToAdd = info; isAddAudioOnly = false },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2F354A)),
+                                        shape = RoundedCornerShape(12.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Icon(Icons.Default.Add, contentDescription = null, tint = Color.White)
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("Add Video to Playlist", color = Color.White, fontWeight = FontWeight.Bold)
+                                    }
                                 }
                                 
-                                Button(
-                                    onClick = { streamToAdd = info; isAddAudioOnly = true },
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2F354A)),
-                                    shape = RoundedCornerShape(12.dp),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Icon(Icons.Default.Add, contentDescription = null, tint = Color.White)
-                                    Spacer(Modifier.width(8.dp))
-                                    Text("Add Audio only to Playlist", color = Color.White, fontWeight = FontWeight.Bold)
+                                if (info.audioUrl != null) {
+                                    HorizontalDivider(color = Color(0xFF2F354A), modifier = Modifier.padding(vertical = 4.dp))
+                                    
+                                    Button(
+                                        onClick = { onPlayYoutube(info.audioUrl, info.title, true) },
+                                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
+                                        shape = RoundedCornerShape(12.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Icon(Icons.Default.Audiotrack, contentDescription = null, tint = Color.White)
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("Play Audio Only (Screen-off safe)", color = Color.White, fontWeight = FontWeight.Bold)
+                                    }
+                                    
+                                    Button(
+                                        onClick = { streamToAdd = info; isAddAudioOnly = true },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2F354A)),
+                                        shape = RoundedCornerShape(12.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Icon(Icons.Default.Add, contentDescription = null, tint = Color.White)
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("Add Audio only to Playlist", color = Color.White, fontWeight = FontWeight.Bold)
+                                    }
                                 }
                             }
                         }

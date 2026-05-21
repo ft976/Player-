@@ -1,6 +1,7 @@
 package com.example
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -47,6 +48,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         requestStoragePermissions()
+        handleIntent(intent)
         
         setContent {
             MyApplicationTheme {
@@ -70,12 +72,6 @@ class MainActivity : ComponentActivity() {
                         }
                         
                         composable<PlayerRoute> { backStackEntry ->
-                            val route = backStackEntry.arguments?.let {
-                                // Manual extraction since Navigation serialization needs a bit more setup in some cases,
-                                // but we are using type-safe compose nav 2.8.0.
-                            }
-                            
-                            // Let's use the explicit savedStateHandle extraction for 2.8.0
                             val args = backStackEntry.toRoute<PlayerRoute>()
                             PlayerScreen(
                                 videoUri = args.uri,
@@ -89,6 +85,34 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIntent(intent)
+    }
+
+    private fun handleIntent(intent: Intent?) {
+        if (intent != null && intent.action == Intent.ACTION_SEND && "text/plain" == intent.type) {
+            val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)
+            if (!sharedText.isNullOrBlank()) {
+                val cleanUrl = extractUrl(sharedText)
+                if (cleanUrl.isNotBlank()) {
+                    viewModel.fetchYoutubeStream(cleanUrl)
+                }
+            }
+        }
+    }
+
+    private fun extractUrl(text: String): String {
+        val words = text.split("\\s+".toRegex())
+        for (word in words) {
+            if (word.startsWith("http://", ignoreCase = true) || word.startsWith("https://", ignoreCase = true)) {
+                return word
+            }
+        }
+        return text
     }
 
     private fun requestStoragePermissions() {
